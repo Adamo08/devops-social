@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🐳 DevOps Social</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+        }
+
+        .stats {
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 30px;
+            color: white;
+            text-align: center;
+        }
+
+        .post-form {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .post-form input,
+        .post-form textarea {
+            width: 100%;
+            padding: 15px;
+            margin-bottom: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border 0.3s;
+        }
+
+        .post-form input:focus,
+        .post-form textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .post-form textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .post-form button {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .post-form button:hover {
+            transform: translateY(-2px);
+        }
+
+        .posts {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .post {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+
+        .post:hover {
+            transform: translateX(5px);
+        }
+
+        .post-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+        }
+
+        .post-username {
+            font-weight: bold;
+            color: #667eea;
+            font-size: 18px;
+        }
+
+        .post-time {
+            color: #999;
+            font-size: 14px;
+        }
+
+        .post-content {
+            color: #333;
+            line-height: 1.6;
+            font-size: 16px;
+        }
+
+        .cache-badge {
+            display: inline-block;
+            padding: 5px 10px;
+            background: #ffd700;
+            border-radius: 5px;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+
+        .loading {
+            text-align: center;
+            color: white;
+            font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🐳 DevOps Social</h1>
+            <p>Built with Docker Magic ✨</p>
+        </div>
+
+        <div class="stats" id="stats">
+            Loading stats...
+        </div>
+
+        <div class="post-form">
+            <h2 style="margin-bottom: 20px;">Share Your Docker Journey</h2>
+            <input type="text" id="username" placeholder="Your name" />
+            <textarea id="content" placeholder="What's on your mind about Docker?"></textarea>
+            <button onclick="createPost()">🚀 Post It!</button>
+        </div>
+
+        <div class="posts" id="posts">
+            <div class="loading">Loading posts...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+
+        async function loadStats() {
+            try {
+                const response = await fetch(`${API_URL}/stats`);
+                const data = await response.json();
+                document.getElementById('stats').innerHTML = `
+                    📊 Total Posts: ${data.total_posts} |
+                    💾 Cache Keys: ${data.cache_keys} |
+                    ${data.docker_magic}
+                `;
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        async function loadPosts() {
+            try {
+                const response = await fetch(`${API_URL}/posts`);
+                const data = await response.json();
+
+                const postsHtml = data.posts.map(post => `
+                    <div class="post">
+                        <div class="post-header">
+                            <div class="post-username">
+                                ${post.username}
+                                ${data.from_cache ? '<span class="cache-badge">⚡ Cached</span>' : ''}
+                            </div>
+                            <div class="post-time">${new Date(post.created_at).toLocaleString()}</div>
+                        </div>
+                        <div class="post-content">${post.content}</div>
+                    </div>
+                `).join('');
+
+                document.getElementById('posts').innerHTML = postsHtml || '<p style="color: white; text-align: center;">No posts yet. Be the first! 🎉</p>';
+            } catch (error) {
+                console.error('Error loading posts:', error);
+                document.getElementById('posts').innerHTML = '<p style="color: white; text-align: center;">Error loading posts 😢</p>';
+            }
+        }
+
+        async function createPost() {
+            const username = document.getElementById('username').value;
+            const content = document.getElementById('content').value;
+
+            if (!username || !content) {
+                alert('Please fill in both fields!');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/posts`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, content })
+                });
+
+                if (response.ok) {
+                    document.getElementById('username').value = '';
+                    document.getElementById('content').value = '';
+                    loadPosts();
+                    loadStats();
+                }
+            } catch (error) {
+                console.error('Error creating post:', error);
+                alert('Error creating post 😢');
+            }
+        }
+
+        // Load data on page load
+        loadStats();
+        loadPosts();
+
+        // Refresh posts every 5 seconds
+        setInterval(() => {
+            loadPosts();
+            loadStats();
+        }, 5000);
+    </script>
+</body>
+</html>
