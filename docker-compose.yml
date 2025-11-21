@@ -1,19 +1,4 @@
 services:
-  # PostgreSQL Database
-  db:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_DB: devops_social
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   # FastAPI Backend
   backend:
     build: ./backend
@@ -25,9 +10,7 @@ services:
       DB_USER: postgres
       DB_PASSWORD: postgres
     depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
+      - db
 
   # Nginx Frontend
   frontend:
@@ -36,15 +19,11 @@ services:
       - "3000:80"
     depends_on:
       - backend
-    restart: unless-stopped
-
-  # Bonus: Adminer (Database GUI)
-  adminer:
-    image: adminer
-    ports:
-      - "8080:8080"
+  
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
     environment:
-      ADMINER_DEFAULT_SERVER: db
-
-volumes:
-  postgres_data:
+      POSTGRES_DB: devops_social
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
