@@ -457,6 +457,25 @@ docker compose up -d --build
 6. Started `frontend` after `backend` (depends_on)
 7. All services can communicate using service names
 
+**⚠️ Potential Issue: Backend May Crash on First Start**
+
+You might see an error like this:
+```
+backend-1 | psycopg2.OperationalError: connection to server at "db" failed: Connection refused
+backend-1 exited with code 3
+```
+
+**Why?** The basic `depends_on` only waits for the **container to start**, not for PostgreSQL to be **ready to accept connections**. The database needs a few seconds to initialize.
+
+**Quick Fix:** Simply run the command again:
+```bash
+docker compose up
+```
+
+The database is now ready, and backend will start successfully!
+
+**Proper Solution:** This issue is solved with **health checks** (see Challenge 3 below or check the `solution` branch). Health checks make `depends_on` smarter by waiting for the service to be actually ready.
+
 **Access your application:**
 - Frontend: http://localhost:3000
 - Backend: http://localhost:8000
