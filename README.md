@@ -1,52 +1,286 @@
-# 🐳 DevOps Social - Docker Workshop Project
+# Docker Workshop - Part 2: Multi-Service Application with Docker Compose
 
-A Twitter-like social media application built with Docker to demonstrate containerization and multi-service orchestration.
+A hands-on workshop demonstrating multi-container orchestration using a Twitter-like social media application.
 
-## 🎯 What You'll Learn
+## Table of Contents
+- [The Problem](#the-problem)
+- [Getting Started](#getting-started)
+- [Workshop Structure](#workshop-structure)
+- [Project Architecture](#project-architecture)
+- [Phase 1: Manual Container Management](#phase-1-manual-container-management)
+- [Phase 2: Introducing Docker Compose](#phase-2-introducing-docker-compose)
+- [Essential Docker Compose Commands](#essential-docker-compose-commands)
+- [Testing Your Application](#testing-your-application)
+- [What You've Learned](#what-youve-learned)
 
-- Building custom Docker images with Dockerfiles
-- Multi-container orchestration with Docker Compose
-- Database persistence with volumes
-- Container networking and communication
-- Health checks and service dependencies
+---
 
-## 🏗️ Architecture
+## The Problem
+
+In Part 1, you learned how to containerize a single application. But real-world applications are rarely that simple. Most production systems consist of **multiple services** that need to work together:
+
+- **Frontend** (web server serving HTML/CSS/JS)
+- **Backend** (API server with business logic)
+- **Database** (persistent data storage)
+- **Caching layer** (Redis, Memcached)
+- **Message queue** (RabbitMQ, Kafka)
+
+### The Challenge: Managing Multiple Containers
+
+Imagine you have 3 services (like our app: Frontend, Backend, Database). Without Docker Compose, you would need to:
+
+1. **Start containers in the correct order** (database first, then backend, then frontend)
+2. **Manually configure networking** between containers
+3. **Track multiple environment variables** for each service
+4. **Remember complex docker run commands** with many flags
+5. **Stop and remove** each container individually
+6. **Rebuild and restart** everything when code changes
+
+**For a team of developers, this becomes a nightmare:**
+- Dev A forgets to start the database first → backend crashes
+- Dev B uses wrong environment variables → can't connect to database
+- Dev C rebuilds only backend, forgets frontend → stale UI
+- Dev D can't remember the exact `docker run` command → wastes 30 minutes debugging
+
+**This doesn't scale!**
+
+---
+
+## Getting Started
+
+### Prerequisites:
+- Docker installed ([Get Docker](https://docs.docker.com/get-docker/))
+- Git installed
+- Completed Part 1 of the workshop (recommended)
+- Text editor of your choice
+
+**Note for Windows users:** Use **Git Bash** to run the commands in this workshop, not CMD or PowerShell. Git Bash provides a Unix-like terminal that supports the same commands as Linux/macOS.
+
+### Clone and Navigate:
+```bash
+# Clone the repository
+git clone https://github.com/Adamo08/devops-social.git
+
+# Navigate to the project directory
+cd devops-social
+```
+
+---
+
+## Workshop Structure
+
+### Branches:
+- `main` - Starting point (application code only, no Docker files)
+- `solution` - Complete solution with Dockerfiles and docker-compose.yml
+
+### Switching Branches:
+```bash
+# View all branches
+git branch -a
+
+# Switch to solution branch (if you get stuck)
+git checkout solution
+
+# Go back to main to continue the workshop
+git checkout main
+```
+
+---
+
+## Project Architecture
+
+This is a **3-tier web application** (Twitter-like social media platform):
 
 ```
 ┌─────────────┐
 │   Browser   │
 └──────┬──────┘
-       │
+       │ HTTP request to localhost:3000
        ▼
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Nginx     │────▶│   FastAPI   │────▶│ PostgreSQL  │
-│  Frontend   │     │   Backend   │     │  Database   │
-│  (Port 3000)│     │  (Port 8000)│     │             │
-└─────────────┘     └─────────────┘     └─────────────┘
+┌─────────────────────────┐
+│  Frontend (Nginx)       │
+│  Port: 3000             │
+│  - HTML/CSS/JavaScript  │
+│  - Served by Nginx      │
+└──────┬──────────────────┘
+       │ Fetch API requests via CORS
+       │ to localhost:8000
+       ▼
+┌──────────────────────────┐
+│  Backend (FastAPI)       │
+│  Port: 8000              │
+│  - Python REST API       │
+│  - Business logic        │
+│  - Database operations   │
+└──────┬───────────────────┘
+       │ psycopg2 connection
+       │ to db:5432
+       ▼
+┌──────────────────────────┐
+│  Database (PostgreSQL)   │
+│  Port: 5432              │
+│  - Stores posts          │
+│  - Persistent storage    │
+└──────────────────────────┘
 ```
 
-## ❌ The Problem: Running Services Manually
+### Services Overview:
 
-Before we dive into the easy way, let's understand **why** Docker Compose exists. Imagine you need to run this application without Docker Compose. Here's what you'd have to do:
+| Service | Technology | Port | Purpose |
+|---------|-----------|------|---------|
+| **Frontend** | Nginx (Alpine) | 3000 | Serves static HTML/CSS/JS UI |
+| **Backend** | Python 3.11 + FastAPI | 8000 | RESTful API, business logic |
+| **Database** | PostgreSQL 15 (Alpine) | 5432 | Persistent data storage |
 
-### Step 1: Start PostgreSQL
+---
+
+## Phase 1: Manual Container Management
+
+In this phase, you'll experience the **pain** of managing multiple containers manually. This will help you appreciate Docker Compose later!
+
+### Step 1.1: Create Dockerfiles
+
+You need to create a Dockerfile for each service that needs to be built.
+
+#### Task 1: Create Backend Dockerfile
+
+Create `backend/Dockerfile`:
+
+**Requirements:**
+- Base image: `python:3.11-slim`
+- Working directory: `/app`
+- Copy `requirements.txt` and install dependencies
+- Copy all backend code
+- Expose port `8000`
+- Command: `uvicorn main:app --host 0.0.0.0 --port 8000`
+
+**Hint:**
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 8000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+#### Task 2: Create Frontend Dockerfile
+
+Create `frontend/Dockerfile`:
+
+**Requirements:**
+- Base image: `nginx:alpine`
+- Copy `index.html` to `/usr/share/nginx/html/`
+- Expose port `80`
+- Command: `nginx -g "daemon off;"`
+
+**Hint:**
+```dockerfile
+FROM nginx:alpine
+COPY index.html /usr/share/nginx/html/
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+---
+
+### Step 1.2: Build Your Images
+
+Build Docker images for each service:
+
+```bash
+# Build backend image
+docker build -t devops-social-backend ./backend
+
+# Build frontend image
+docker build -t devops-social-frontend ./frontend
+```
+
+Verify images were created:
+```bash
+docker images | grep devops-social
+```
+
+---
+
+### Step 1.3: Run Containers Manually (The Hard Way)
+
+Now let's start all containers manually. **Pay attention to the order and complexity!**
+
+#### Why Order Matters - A Quick Experiment
+
+**What happens if you start the backend first?** Let's try it:
+
+```bash
+# Try to start backend WITHOUT the database running
+docker run -d \
+  --name devops-social-backend \
+  -p 8000:8000 \
+  -e DB_HOST=devops-social-db \
+  -e DB_NAME=devops_social \
+  -e DB_USER=postgres \
+  -e DB_PASSWORD=postgres \
+  devops-social-backend
+```
+
+**Check the logs:**
+```bash
+docker logs devops-social-backend
+```
+
+**Result:** ❌ Backend crashes! It can't connect to the database because it doesn't exist yet.
+
+You'll see errors like:
+```
+psycopg2.OperationalError: could not translate host name "devops-social-db" to address
+```
+
+**Clean up the failed backend:**
+```bash
+docker stop devops-social-backend
+docker rm devops-social-backend
+```
+
+**This demonstrates a critical problem: Service dependencies must be managed manually!**
+
+Now let's do it the correct way:
+
+---
+
+#### Step 1.3.1: Start the Database First
+
+**Why first?** Because the backend depends on it!
+
 ```bash
 docker run -d \
   --name devops-social-db \
   -e POSTGRES_USER=postgres \
   -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=devops_social \
-  -v postgres_data:/var/lib/postgresql/data \
   -p 5432:5432 \
   postgres:15-alpine
 ```
 
-### Step 2: Build and Start Backend
-```bash
-# First, build the backend image
-docker build -t devops-social-backend ./backend
+**Explanation of flags:**
+- `-d` - Run in detached mode (background)
+- `--name` - Give container a custom name for reference
+- `-e` - Set environment variables (database credentials)
+- `-p` - Publish port (host:container)
 
-# Then run it with ALL the environment variables and network links
+**Wait for database to be ready** (give it ~5-10 seconds):
+```bash
+# Check if database is ready
+docker logs devops-social-db
+```
+
+---
+
+#### Step 1.3.2: Start the Backend Second
+
+**Why second?** It needs to connect to the database!
+
+```bash
 docker run -d \
   --name devops-social-backend \
   -p 8000:8000 \
@@ -58,346 +292,653 @@ docker run -d \
   devops-social-backend
 ```
 
-### Step 3: Build and Start Frontend
-```bash
-# Build the frontend image
-docker build -t devops-social-frontend ./frontend
+**Explanation of additional flags:**
+- `--link` - Legacy way to connect containers (deprecated but simple for demonstration)
 
-# Run it
+**Wait and verify:**
+```bash
+# Check backend logs for successful database connection
+docker logs devops-social-backend
+```
+
+---
+
+#### Step 1.3.3: Start the Frontend Last
+
+```bash
 docker run -d \
   --name devops-social-frontend \
   -p 3000:80 \
   devops-social-frontend
 ```
 
-### Step 4: Start Database Admin Tool
+---
+
+### Step 1.4: Test the Manual Setup
+
+Open your browser:
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- API Docs: http://localhost:8000/docs
+
+Try posting a message!
+
+---
+
+### Step 1.5: The Problems You Just Experienced
+
+Let's reflect on what you just did:
+
+**Problems:**
+1. ❌ **Critical Startup Order:**
+   - If you start backend before database → backend crashes
+   - If you start frontend before backend → API calls fail
+   - You MUST remember: database → backend → frontend (always!)
+
+2. ❌ **No Automatic Dependency Management:**
+   - Docker doesn't know backend depends on database
+   - You must manually ensure the database is ready before starting backend
+   - One wrong order = everything fails
+
+3. ❌ **Long Commands:** Each `docker run` has 5+ flags to remember
+
+4. ❌ **Environment Variables:** Easy to mistype or forget one
+
+5. ❌ **Container Linking:** Using deprecated `--link` flag to connect containers
+
+6. ❌ **Hard to Share:** How do you tell your teammate these exact steps?
+
+7. ❌ **Difficult Updates:** Change one thing → restart everything manually
+
+8. ❌ **Manual Cleanup:** Need to stop and remove each container individually
+
+**Stop all containers manually:**
 ```bash
-docker run -d \
-  --name devops-social-adminer \
-  -p 8080:8080 \
-  --link devops-social-db:db \
-  adminer
+docker stop devops-social-frontend devops-social-backend devops-social-db
+docker rm devops-social-frontend devops-social-backend devops-social-db
 ```
 
-### 😰 Problems with This Approach:
+**Frustrating, right?** This is exactly why Docker Compose was created!
 
-1. **Order Matters**: You must start database before backend, or backend will crash
-2. **Manual Networking**: You need to figure out container IPs or use legacy `--link`
-3. **Complex Commands**: Each service requires multiple flags and environment variables
-4. **No Orchestration**: If database restarts, backend doesn't reconnect automatically
-5. **Hard to Maintain**: Updating configuration means updating 5+ commands
-6. **Error-Prone**: Easy to forget an environment variable or port mapping
-7. **Difficult to Share**: How do you share these 5 commands with your team?
-8. **No Dependency Management**: Services don't wait for health checks
-9. **Manual Cleanup**: You need to stop and remove 5 containers individually
-10. **Volume Management**: Manual tracking of volume names and cleanup
+---
 
-**Starting the app manually:**
+## Phase 2: Introducing Docker Compose
+
+Docker Compose is a tool that lets you define and run multi-container applications using a single YAML configuration file.
+
+### The Magic of Docker Compose
+
+Instead of remembering 3+ complex `docker run` commands, you write **one configuration file** and use **two simple commands**:
+
 ```bash
-# You'd need a script like this:
-./start-database.sh
-sleep 5  # Wait for database...
-./start-backend.sh
-sleep 3  # Wait for backend...
-./start-frontend.sh
-./start-adminer.sh
-```
-
-**Stopping the app manually:**
-```bash
-docker stop devops-social-frontend devops-social-backend \
-  devops-social-db devops-social-adminer
-docker rm devops-social-frontend devops-social-backend \
-  devops-social-db devops-social-adminer
-docker volume rm postgres_data  # If you want to clean up
+docker compose up      # Start everything
+docker compose down    # Stop everything
 ```
 
 ---
 
-## ✅ The Solution: Docker Compose
+### Step 2.1: Create docker-compose.yml
 
-Docker Compose solves all these problems with a single configuration file. Instead of 4 complex commands, you get:
+Create a file named `docker-compose.yml` in the project root.
+
+**Your Task:** Define all three services in one file.
+
+#### Minimal Docker Compose Structure (No Volumes/Networks)
 
 ```yaml
-# docker-compose.yml - One file to rule them all!
 services:
-  frontend: ...
-  backend: ...
-  db: ...
-  adminer: ...
+  # Database service
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: devops_social
+    ports:
+      - "5432:5432"
+
+  # Backend service
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DB_HOST: db
+      DB_NAME: devops_social
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+    depends_on:
+      - db
+
+  # Frontend service
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
 ```
 
-**Starting the app with Compose:**
-```bash
-docker compose up
-```
+**Key Concepts:**
 
-**Stopping the app with Compose:**
-```bash
-docker compose down
-```
+| Field | Description |
+|-------|-------------|
+| `services:` | Defines all containers in your application |
+| `image:` | Pre-built image to use (for db) |
+| `build:` | Path to Dockerfile to build (for backend/frontend) |
+| `ports:` | Port mapping (host:container) |
+| `environment:` | Environment variables |
+| `depends_on:` | Service startup order |
 
-That's it! Docker Compose handles:
-- ✅ Service orchestration and startup order
-- ✅ Automatic networking between containers
-- ✅ Environment variable management
-- ✅ Health checks and dependencies
-- ✅ Volume management
-- ✅ One-command start/stop/rebuild
-- ✅ Easy to read, maintain, and share
+**Magic Happening Behind the Scenes:**
+- ✅ Docker Compose creates a **default network** automatically
+- ✅ Services can reach each other using **service names** (e.g., `db`, `backend`)
+- ✅ Services start in **dependency order** (db → backend → frontend)
+- ✅ All configuration in **one readable file**
 
 ---
 
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Docker Desktop installed (or Docker Engine + Docker Compose)
-- No other services running on ports 3000, 8000, 8080
-
-### Running the Application
-
-1. **Clone or navigate to the project directory:**
-   ```bash
-   cd devops-social
-   ```
-
-2. **Start all services (with Docker Compose!):**
-   ```bash
-   docker compose up --build
-   ```
-
-3. **Access the application:**
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:8000
-   - Database Admin (Adminer): http://localhost:8080
-   - API Documentation: http://localhost:8000/docs
-
-### Stopping the Application
+### Step 2.2: Start Everything with One Command
 
 ```bash
-docker compose down
+# Start all services (builds images if needed)
+docker compose up --build
+
+# Or run in detached mode (background)
+docker compose up -d --build
 ```
 
-To remove all data (including database volumes):
+**What just happened?**
+1. Docker Compose read your `docker-compose.yml`
+2. Created a default network (`devops-social_default`)
+3. Built the backend and frontend images
+4. Started `db` first (no dependencies)
+5. Started `backend` after `db` (depends_on)
+6. Started `frontend` after `backend` (depends_on)
+7. All services can communicate using service names
+
+**Access your application:**
+- Frontend: http://localhost:3000
+- Backend: http://localhost:8000
+
+---
+
+### Step 2.3: Stop Everything with One Command
+
 ```bash
+# Stop and remove all containers
+docker compose down
+
+# Stop and remove containers + volumes (delete all data)
 docker compose down -v
 ```
 
-## 📦 Services
+**Compare:**
 
-### Frontend (Nginx)
-- **Port:** 3000
-- **Technology:** HTML/CSS/JavaScript served by Nginx
-- **Features:** Beautiful UI with real-time updates every 5 seconds
-
-### Backend (FastAPI)
-- **Port:** 8000
-- **Technology:** Python with FastAPI framework
-- **Features:**
-  - RESTful API endpoints
-  - PostgreSQL database integration
-  - Automatic database schema creation
-
-### Database (PostgreSQL)
-- **Technology:** PostgreSQL 15 (Alpine)
-- **Features:**
-  - Persistent data storage with volumes
-  - Health checks for service readiness
-  - Stores all posts with timestamps
-
-### Admin (Adminer)
-- **Port:** 8080
-- **Features:**
-  - Web-based database management
-  - Query posts directly
-  - Inspect database schema
-
-## 📝 API Endpoints
-
-### GET /
-Returns API status message
-
-### GET /posts
-Returns all posts (up to 50 most recent)
-
-### POST /posts
-Create a new post
-```json
-{
-  "username": "string",
-  "content": "string"
-}
+**Manual Way (The Pain):**
+```bash
+docker stop devops-social-frontend devops-social-backend devops-social-db
+docker rm devops-social-frontend devops-social-backend devops-social-db
+docker network rm devops-social-network
 ```
 
-### GET /stats
-Returns application statistics
-- Total posts count
-- Docker magic indicator
-
-## 🧪 Testing the Application
-
-1. **Post a message:**
-   - Open http://localhost:3000
-   - Enter your name and a message
-   - Click "Post It!"
-
-2. **Explore the database:**
-   - Open http://localhost:8080
-   - Server: `db`
-   - Username: `postgres`
-   - Password: `postgres`
-   - Database: `devops_social`
-
-3. **View logs:**
-   ```bash
-   docker compose logs backend
-   docker compose logs frontend
-   ```
-
-## 🔧 Useful Docker Commands
-
+**Docker Compose Way (The Joy):**
 ```bash
-# View running containers
+docker compose down
+```
+
+---
+
+### Step 2.4: Understanding Service Communication
+
+With Docker Compose, services use **service names** as hostnames:
+
+**In `backend/main.py`:**
+```python
+# Backend connects to database using service name "db"
+DB_HOST = os.getenv("DB_HOST", "db")  # "db" is the service name!
+```
+
+**In `docker-compose.yml`:**
+```yaml
+backend:
+  environment:
+    DB_HOST: db  # This resolves to the "db" service's IP automatically
+```
+
+**Docker Compose handles DNS resolution** so you never need to know container IPs!
+
+---
+
+### Step 2.5: How Docker Run Flags Map to Docker Compose
+
+Here's how the complex `docker run` commands translate to clean YAML:
+
+| docker run flag | docker-compose.yml field |
+|----------------|-------------------------|
+| `--name myapp` | Service name (e.g., `backend:`) |
+| `-p 8000:8000` | `ports: - "8000:8000"` |
+| `-e KEY=value` | `environment: KEY: value` |
+| `--network mynet` | Automatic (default network) |
+| `-v vol:/data` | `volumes: - vol:/data` |
+| `-d` | `docker compose up -d` |
+| `--rm` | `docker compose down` removes containers |
+
+---
+
+## Essential Docker Compose Commands
+
+### Starting and Stopping:
+```bash
+# Start all services (foreground, see logs)
+docker compose up
+
+# Start all services in background
+docker compose up -d
+
+# Start and rebuild images
+docker compose up --build
+
+# Start specific service
+docker compose up backend
+
+# Stop all services
+docker compose down
+
+# Stop and remove volumes (delete data)
+docker compose down -v
+```
+
+### Monitoring:
+```bash
+# View running services
 docker compose ps
 
 # View logs for all services
 docker compose logs
 
 # View logs for specific service
-docker compose logs backend -f
+docker compose logs backend
 
-# Execute command in running container
+# Follow logs in real-time
+docker compose logs -f
+
+# View last 100 lines
+docker compose logs --tail=100
+```
+
+### Rebuilding and Restarting:
+```bash
+# Rebuild specific service
+docker compose build backend
+
+# Rebuild all services
+docker compose build
+
+# Restart specific service
+docker compose restart backend
+
+# Restart all services
+docker compose restart
+```
+
+### Executing Commands in Containers:
+```bash
+# Open shell in backend container
 docker compose exec backend bash
 
-# Rebuild specific service
-docker compose up --build backend
+# Run a one-off command
+docker compose exec backend python -c "print('Hello')"
+
+# Access database CLI
+docker compose exec db psql -U postgres -d devops_social
+```
+
+### Inspecting and Debugging:
+```bash
+# View service configuration
+docker compose config
+
+# Validate docker-compose.yml
+docker compose config --quiet
 
 # View resource usage
 docker stats
+
+# Inspect network
+docker network ls
+docker network inspect devops-social_default
 ```
 
-## ✨ Features
+---
 
-### Users Can:
-- ✍️ Post messages with username
-- 📖 Read all posts in chronological order
-- 🕐 See timestamps for each post
-- 📊 View application statistics
+## Testing Your Application
 
-### Technical Highlights:
-- RESTful API design
-- Real-time UI updates (5-second refresh)
-- Database persistence across restarts
-- Beautiful gradient UI
-- Health checks for reliability
-- Docker networking for service communication
+### 1. Post a Message
 
-## 🏆 Challenges
+1. Open http://localhost:3000
+2. Enter your username
+3. Type a message
+4. Click "Post It!"
+5. Watch it appear in the feed (refreshes every 5 seconds)
 
-Want to level up? Try these challenges:
+### 2. Check the Backend API
 
-### Challenge 1: Enhance the UI ⭐
-- Add user avatars
-- Add likes/reactions to posts
-- Add delete functionality
-- Implement dark mode
+Visit http://localhost:8000/docs to see interactive API documentation (FastAPI auto-generates this!)
 
-### Challenge 2: Add Authentication ⭐⭐
-- Add user registration and login
-- Implement JWT tokens
-- Protect POST endpoints
-- Add user profiles
+**Try these endpoints:**
+- `GET /` - Health check
+- `GET /posts` - Get all posts
+- `POST /posts` - Create a post
+- `GET /stats` - View statistics
 
-### Challenge 3: Add More Features ⭐⭐⭐
-- Add comments to posts
-- Add image uploads
-- Add hashtag search
-- Add user following system
+### 3. Inspect the Database
 
-### Challenge 4: Production Ready ⭐⭐⭐⭐
+**Option 1: Using Adminer (Optional)**
+
+Add this to your `docker-compose.yml`:
+```yaml
+  adminer:
+    image: adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+```
+
+Then access http://localhost:8080:
+- System: PostgreSQL
+- Server: `db`
+- Username: `postgres`
+- Password: `postgres`
+- Database: `devops_social`
+
+**Option 2: Using psql CLI**
+```bash
+# Access PostgreSQL shell
+docker compose exec db psql -U postgres -d devops_social
+
+# Query posts
+SELECT * FROM posts;
+
+# Exit
+\q
+```
+
+### 4. View Logs
+
+```bash
+# View all logs
+docker compose logs
+
+# View backend logs
+docker compose logs backend -f
+
+# View database logs
+docker compose logs db --tail=50
+```
+
+---
+
+## What You've Learned
+
+### Part 1 Recap:
+1. **Single Container:** Dockerfile → Build → Run → Push to Docker Hub
+2. **Image Sharing:** Why sharing images is better than Dockerfiles for teams
+
+### Part 2 New Concepts:
+1. **Multi-Container Apps:** Real applications have multiple services
+2. **Manual Container Management:** The pain of `docker run` with many flags
+3. **Service Dependencies:** Order matters (db → backend → frontend)
+4. **Container Networking:** How services communicate using service names
+5. **Docker Compose Benefits:**
+   - One configuration file (`docker-compose.yml`)
+   - One command to start (`docker compose up`)
+   - One command to stop (`docker compose down`)
+   - Automatic networking between services
+   - Dependency management with `depends_on`
+6. **docker run → docker-compose mapping:** How flags translate to YAML
+
+### Key Insights:
+
+**Before Docker Compose:**
+- 3+ complex `docker run` commands
+- Manual network creation
+- Manual startup order
+- Easy to make mistakes
+- Hard to share with team
+
+**After Docker Compose:**
+- 1 readable YAML file
+- Automatic networking
+- Automatic startup order
+- Consistent across team
+- Easy to version control
+
+---
+
+## Next Steps
+
+Want to go deeper? Try these challenges:
+
+### Challenge 1: Add Data Persistence ⭐
+Currently, if you run `docker compose down`, all database data is lost. Add a **volume** to persist data:
+
+```yaml
+services:
+  db:
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
+```
+
+### Challenge 2: Add Environment File ⭐⭐
+Instead of hardcoding environment variables, use a `.env` file:
+
+```yaml
+services:
+  backend:
+    env_file:
+      - .env
+```
+
+Create `.env`:
+```
+DB_HOST=db
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_NAME=devops_social
+```
+
+### Challenge 3: Add Health Checks ⭐⭐⭐
+Make `depends_on` smarter by adding health checks:
+
+```yaml
+services:
+  db:
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    depends_on:
+      db:
+        condition: service_healthy
+```
+
+### Challenge 4: Custom Networks ⭐⭐⭐
+Learn how to create custom networks for better isolation and control:
+
+```yaml
+services:
+  backend:
+    networks:
+      - app-network
+      - db-network
+
+  frontend:
+    networks:
+      - app-network
+
+  db:
+    networks:
+      - db-network
+
+networks:
+  app-network:
+    driver: bridge
+  db-network:
+    driver: bridge
+```
+
+**Why use custom networks?**
+- **Isolation:** Frontend can't directly access database
+- **Security:** Only backend can talk to database
+- **Organization:** Group related services together
+
+**Practical Example for Our Application:**
+
+```yaml
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: devops_social
+    networks:
+      - backend-network  # Only accessible by backend
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DB_HOST: db
+      DB_NAME: devops_social
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+    depends_on:
+      - db
+    networks:
+      - backend-network  # Can access database
+      - frontend-network # Can be accessed by frontend
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - frontend-network  # Can access backend only
+
+networks:
+  frontend-network:
+  backend-network:
+```
+
+**Benefits:**
+- Frontend → Backend ✅ (via frontend-network)
+- Backend → Database ✅ (via backend-network)
+- Frontend → Database ❌ (isolated, more secure!)
+
+### Challenge 5: Production Setup ⭐⭐⭐⭐
 - Add Nginx reverse proxy
-- Add HTTPS with Let's Encrypt
-- Add environment-based configs
-- Add monitoring (Prometheus + Grafana)
-- Add logging (ELK stack)
+- Use separate `docker-compose.prod.yml`
+- Add logging configuration
+- Use Docker secrets for passwords
 
-## 🐛 Troubleshooting
+---
+
+## Troubleshooting
 
 ### Port Already in Use
 ```bash
-# Find process using port 3000
-lsof -i :3000
-# Kill the process or change port in docker-compose.yml
+# Linux/macOS: Find what's using port 3000
+sudo lsof -i :3000
+
+# Windows (PowerShell): Find what's using port 3000
+netstat -ano | findstr :3000
+
+# Or simply change the port in docker-compose.yml
+# Change "3000:80" to "3001:80" for frontend
+```
+
+### Service Won't Start
+```bash
+# Check logs
+docker compose logs backend
+
+# Check service status
+docker compose ps
+
+# Rebuild from scratch
+docker compose down
+docker compose up --build
 ```
 
 ### Database Connection Failed
 ```bash
-# Check if database is healthy
-docker compose ps
-# Wait for health check to pass
+# Check if db is running
+docker compose ps db
+
 # View database logs
 docker compose logs db
-```
 
-### Frontend Can't Reach Backend
-- Check if backend is running: http://localhost:8000
-- Verify CORS settings in backend/main.py
-- Check browser console for errors
+# Restart database
+docker compose restart db
+```
 
 ### Changes Not Reflecting
 ```bash
-# Rebuild containers
+# Rebuild services
 docker compose up --build
+
 # Or rebuild specific service
-docker compose up --build frontend
+docker compose up --build backend
 ```
 
-## 📚 Learn More
+### Clean Slate
+```bash
+# Remove everything (containers, networks, volumes, images)
+docker compose down -v --rmi all
 
-- [Docker Documentation](https://docs.docker.com)
+# Start fresh
+docker compose up --build
+```
+
+---
+
+## Additional Resources
+
 - [Docker Compose Documentation](https://docs.docker.com/compose/)
+- [Docker Compose File Reference](https://docs.docker.com/compose/compose-file/)
 - [FastAPI Documentation](https://fastapi.tiangolo.com)
-- [PostgreSQL Documentation](https://www.postgresql.org/docs/)
+- [PostgreSQL Docker Image](https://hub.docker.com/_/postgres)
+- [Nginx Docker Image](https://hub.docker.com/_/nginx)
 
-## 🎓 Workshop Context
+---
 
-This project is part of the Docker Workshop organized by the Computer Science Club. The workshop covers:
-- Container vs VM concepts
-- Docker fundamentals
-- Building custom images
-- Multi-container applications
-- Real-world deployment patterns
+## What's in This Repository
 
-## 📄 Project Structure
+**Application Code:**
+- `backend/` - Python FastAPI server
+  - `main.py` - API endpoints and database logic
+  - `requirements.txt` - Python dependencies
+- `frontend/` - Static web UI
+  - `index.html` - Single-page application
 
-```
-devops-social/
-├── README.md
-├── docker-compose.yml
-├── .dockerignore
-├── backend/
-│   ├── Dockerfile
-│   ├── main.py
-│   └── requirements.txt
-└── frontend/
-    ├── Dockerfile
-    └── index.html
-```
-
-## 🤝 Contributing
-
-Found a bug or have an idea? Feel free to:
-- Open an issue
-- Submit a pull request
-- Share your enhancements with the community
-
-## 📝 License
-
-MIT - Learn, build, and share!
+**Workshop Files:**
+- `README.md` - This comprehensive guide
+- `DOCKER-CHEATSHEET.md` - Quick reference for Docker commands
 
 ---
 
 **Built with ❤️ and 🐳 for the Docker Workshop**
 
-**Happy Dockering!** 🚀
+Happy Dockerizing! 🚀
